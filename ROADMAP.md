@@ -2,13 +2,23 @@
 
 Detailed per-phase docs live in `docs/phases/`. This is the one-page summary.
 
-| Phase | Goal | Key exit criterion |
-|---|---|---|
-| 0 — Foundations | Repo scaffold exists | This commit |
-| 1 — Cluster + Helm | k3s on 2 VMs, one tenant deployed by hand | A real firewall registers end-to-end through k3s |
-| 2 — Management Plane MVP | Provision/suspend/delete tenants via API, not `helm install` by hand | One API call onboards a customer |
-| 3 — Group policies | Close the NethSecurity gap: push firewall config to a group of units (tracked upstream, unimplemented: `NethServer/nethsecurity#1895`) | One action changes config on 10 units at once |
-| 4 — Scale, HA, billing | Production posture | No single VM failure takes more than its own workload down |
+| Phase | Status | Goal | Key exit criterion |
+|---|---|---|---|
+| 0 — Foundations | Done | Repo scaffold exists | This commit |
+| 1 — Cluster + Helm | In progress | k3s on 2 VMs, one tenant deployed by hand | A real firewall registers end-to-end through k3s |
+| 2 — Management Plane MVP | In progress | Provision/suspend/delete tenants via API, not `helm install` by hand | One API call onboards a customer |
+| 3 — Group policies | Not started | Close the NethSecurity gap: push firewall config to a group of units (tracked upstream, unimplemented: `NethServer/nethsecurity#1895`) | One action changes config on 10 units at once |
+| 4 — Scale, HA, billing | Not started | Production posture | No single VM failure takes more than its own workload down |
+
+Each phase doc in `docs/phases/` now includes, per task, what to **study**
+in existing code (ours or upstream Nethesis/NethSecurity), what to
+**reimplement** (an existing pattern, adapted), and what has **no
+reference and must be built new** — written for someone picking up
+implementation directly. Background research behind several of these
+(the `NethServer/my` analysis behind Phase 2's data model and Phase 4's
+SSO/Mimir sections, the upstream backlog tracked for Phase 3) lives in the
+separate `dev-nethsec-reference` repo, linked from each phase doc where
+relevant.
 
 ## Explicitly not planned yet
 

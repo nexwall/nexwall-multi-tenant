@@ -1,5 +1,6 @@
-# Phase 0 — Foundations (current)
+# Phase 0 — Foundations
 
+**Status**: Done. Superseded by Phase 1, which is now in progress.
 **Goal**: repo scaffold exists, nothing deployed yet.
 
 ## Done
@@ -15,3 +16,7 @@
 
 ## Exit criteria
 Both VMs reachable by SSH, DNS wildcard resolving, repo pushed to GitHub with CI passing on the skeleton (lint-only at this stage, nothing to test yet).
+
+## Handoff to Phase 1
+
+All blocking items above were resolved during real deployment — see `docs/adr/0001-orchestrator-k3s.md`'s addendum and `infra/k3s/README.md`'s "Real deployment notes" for what actually happened (private-network node-IP requirement, the taint-does-not-survive-a-restart gotcha, and the WireGuard/nginx public entry point from ADR 0005 that wasn't anticipated in this phase's original scope). Read those before starting Phase 1 work, not just this file.
