@@ -1,0 +1,101 @@
+{{- if .Values.monitoring.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "nexwall.fullname" . }}-grafana-datasources
+  labels: {{- include "nexwall.labels" . | nindent 4 }}
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://{{ include "nexwall.fullname" . }}-prometheus:9090
+        isDefault: true
+      - name: Loki
+        type: loki
+        access: proxy
+        url: http://{{ include "nexwall.fullname" . }}-loki:3100
+      - name: TimescaleDB
+        type: postgres
+        access: proxy
+        url: {{ include "nexwall.fullname" . }}-db:5432
+        database: report
+        user: grafana
+        secureJsonData:
+          password: {{ .Values.secrets.postgresPassword | quote }}
+        jsonData:
+          sslmode: disable
+          postgresVersion: 1600
+          timescaledb: true
+  dashboards-provider.yaml: |
+    apiVersion: 1
+    providers:
+      - name: nexwall-dashboards
+        orgId: 1
+        folder: ''
+        type: file
+        options: { path: /etc/grafana/provisioning/dashboards-json }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "nexwall.fullname" . }}-grafana-data
+  labels: {{- include "nexwall.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: {{ .Values.storage.storageClassName }}
+  resources: { requests: { storage: {{ .Values.storage.grafanaSize }} } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nexwall.fullname" . }}-grafana
+  labels: {{- include "nexwall.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { component: grafana, tenant-id: "{{ .Values.tenantId }}" }
+  template:
+    metadata:
+      labels:
+        {{- include "nexwall.labels" . | nindent 8 }}
+        component: grafana
+    spec:
+      containers:
+        - name: grafana
+          image: {{ .Values.monitoringImages.grafana }}
+          env:
+            - { name: GF_SERVER_SERVE_FROM_SUB_PATH, value: "true" }
+            - { name: GF_SERVER_ROOT_URL, value: "https://{{ .Values.subdomain }}/grafana" }
+            - { name: GF_SECURITY_ADMIN_USER, value: "admin" }
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              value: {{ .Values.secrets.grafanaAdminPassword | quote }}
+          ports: [{ containerPort: 3000 }]
+          volumeMounts:
+            - { name: datasources, mountPath: /etc/grafana/provisioning/datasources }
+            - { name: dash-provider, mountPath: /etc/grafana/provisioning/dashboards }
+            # dashboards-json intentionally NOT mounted here yet — see chart
+            # README: dashboards live in nexwall-controller today (matching
+            # UIDs W3S__804z / liz0yRCZz used by the UI's unit-table links)
+            # and should be copied into this chart as a ConfigMap in Phase 1.
+            - { name: data, mountPath: /var/lib/grafana }
+          resources: {{- toYaml .Values.resources.grafana | nindent 12 }}
+      volumes:
+        - name: datasources
+          configMap: { name: {{ include "nexwall.fullname" . }}-grafana-datasources, items: [{ key: datasources.yaml, path: datasources.yaml }] }
+        - name: dash-provider
+          configMap: { name: {{ include "nexwall.fullname" . }}-grafana-datasources, items: [{ key: dashboards-provider.yaml, path: dashboards-provider.yaml }] }
+        - name: data
+          persistentVolumeClaim: { claimName: {{ include "nexwall.fullname" . }}-grafana-data }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nexwall.fullname" . }}-grafana
+  labels: {{- include "nexwall.labels" . | nindent 4 }}
+spec:
+  selector: { component: grafana, tenant-id: "{{ .Values.tenantId }}" }
+  ports: [{ port: 3000 }]
+{{- end }}

@@ -1,0 +1,164 @@
+openapi: 3.0.3
+info:
+  title: Nexwall Management Plane API
+  version: 0.1.0-draft
+  description: >
+    Provisions and manages isolated nexwall-controller instances (tenants)
+    across the k3s cluster. Does not proxy into any tenant's own controller
+    API — see docs/adr/0003.
+servers:
+  - url: https://mgmt.painel.nexwall.com.br/api
+
+security:
+  - ApiKeyAuth: []
+
+paths:
+  /tenants:
+    get:
+      summary: List all tenants (MSP-wide view)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/TenantSummary' }
+    post:
+      summary: Provision a new tenant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TenantCreateRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tenant' }
+        '409':
+          description: Slug already taken
+
+  /tenants/{tenantId}:
+    parameters:
+      - name: tenantId
+        in: path
+        required: true
+        schema: { type: integer }
+    get:
+      summary: Full tenant detail
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tenant' }
+    delete:
+      summary: Permanently delete a tenant and its namespace
+      responses:
+        '204': { description: Deleted }
+
+  /tenants/{tenantId}/status:
+    parameters:
+      - name: tenantId
+        in: path
+        required: true
+        schema: { type: integer }
+    get:
+      summary: Live health of the tenant's pods (queried from the k8s API, not the tenant's own controller)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantStatus' }
+
+  /tenants/{tenantId}/suspend:
+    parameters:
+      - name: tenantId
+        in: path
+        required: true
+        schema: { type: integer }
+    post:
+      summary: Scale the tenant's deployments to 0 replicas (data retained)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tenant' }
+
+  /tenants/{tenantId}/resume:
+    parameters:
+      - name: tenantId
+        in: path
+        required: true
+        schema: { type: integer }
+    post:
+      summary: Scale the tenant's deployments back up
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tenant' }
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Mgmt-Api-Key
+
+  schemas:
+    TenantCreateRequest:
+      type: object
+      required: [slug, display_name, plan]
+      properties:
+        slug:
+          type: string
+          description: DNS-safe, becomes the subdomain (acme -> acme.painel.nexwall.com.br)
+          pattern: '^[a-z0-9-]{3,32}$'
+        display_name: { type: string }
+        plan:
+          type: string
+          enum: [trial, standard, enterprise]
+        admin_email: { type: string, format: email }
+
+    Tenant:
+      allOf:
+        - $ref: '#/components/schemas/TenantSummary'
+        - type: object
+          properties:
+            vpn_cidr: { type: string, example: 10.107.0.0/16 }
+            vpn_port: { type: integer, example: 20007 }
+            subdomain: { type: string, example: acme.painel.nexwall.com.br }
+            namespace: { type: string, example: tenant-7-acme }
+            helm_release: { type: string, example: tenant-7-acme }
+
+    TenantSummary:
+      type: object
+      properties:
+        tenant_id: { type: integer }
+        slug: { type: string }
+        display_name: { type: string }
+        plan: { type: string }
+        status: { type: string, enum: [provisioning, active, suspended, deleting] }
+        created_at: { type: string, format: date-time }
+
+    TenantStatus:
+      type: object
+      properties:
+        tenant_id: { type: integer }
+        pods_ready: { type: integer }
+        pods_total: { type: integer }
+        healthy: { type: boolean }
+        components:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string, example: api }
+              ready: { type: boolean }
+              restarts: { type: integer }

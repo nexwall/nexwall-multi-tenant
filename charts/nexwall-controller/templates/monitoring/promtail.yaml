@@ -1,0 +1,75 @@
+{{- if .Values.monitoring.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "nexwall.fullname" . }}-promtail-config
+  labels: {{- include "nexwall.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    server:
+      http_listen_port: 9080
+      grpc_listen_port: 0
+    positions:
+      filename: /tmp/positions.yaml
+    clients:
+      - url: http://{{ include "nexwall.fullname" . }}-loki:3100/loki/api/v1/push
+    scrape_configs:
+      - job_name: syslog
+        syslog:
+          listen_address: 0.0.0.0:1514
+          listen_protocol: tcp
+          idle_timeout: 60s
+          label_structured_data: true
+          labels:
+            job: syslog
+            controller_name: {{ .Values.slug }}
+        relabel_configs:
+          - source_labels: ['__syslog_message_hostname']
+            target_label: hostname
+          - source_labels: ['__syslog_message_severity']
+            target_label: level
+          - source_labels: ['__syslog_message_app_name']
+            target_label: application
+          - source_labels: ['__syslog_message_facility']
+            target_label: facility
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nexwall.fullname" . }}-promtail
+  labels: {{- include "nexwall.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { component: promtail, tenant-id: "{{ .Values.tenantId }}" }
+  template:
+    metadata:
+      labels:
+        {{- include "nexwall.labels" . | nindent 8 }}
+        component: promtail
+    spec:
+      containers:
+        - name: promtail
+          image: {{ .Values.monitoringImages.promtail }}
+          args: ["-config.file=/etc/promtail/config.yaml"]
+          ports:
+            - { containerPort: 1514, protocol: TCP }
+            - { containerPort: 9080 }
+          volumeMounts:
+            - { name: config, mountPath: /etc/promtail }
+          resources: {{- toYaml .Values.resources.promtail | nindent 12 }}
+      volumes:
+        - name: config
+          configMap: { name: {{ include "nexwall.fullname" . }}-promtail-config }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nexwall.fullname" . }}-promtail
+  labels: {{- include "nexwall.labels" . | nindent 4 }}
+spec:
+  selector: { component: promtail, tenant-id: "{{ .Values.tenantId }}" }
+  ports:
+    - { port: 1514, name: syslog-tcp }
+    - { port: 9080, name: http }
+{{- end }}

@@ -1,0 +1,13 @@
+SPDX-License-Identifier: GPL-3.0-only
+
+This project is licensed under the GNU General Public License v3.0, to stay
+compatible with the nexwall-controller/NethSecurity images it orchestrates
+(see NOTICE.md).
+
+The canonical license text is intentionally not reproduced here from memory —
+fetch it verbatim before pushing to GitHub (GPL-3.0 explicitly permits and
+expects verbatim redistribution of its own text):
+
+    curl -o LICENSE https://www.gnu.org/licenses/gpl-3.0.txt
+
+Then remove this placeholder file's content and replace it with that output.

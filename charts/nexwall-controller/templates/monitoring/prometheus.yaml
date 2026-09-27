@@ -1,0 +1,75 @@
+{{- if .Values.monitoring.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "nexwall.fullname" . }}-prometheus-config
+  labels: {{- include "nexwall.labels" . | nindent 4 }}
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 30s
+      evaluation_interval: 30s
+    scrape_configs:
+      - job_name: prometheus
+        static_configs: [{ targets: ['127.0.0.1:9090'] }]
+      - job_name: loki
+        static_configs: [{ targets: ['{{ include "nexwall.fullname" . }}-loki:3100'] }]
+      - job_name: node
+        http_sd_configs:
+          - url: "http://{{ .Values.secrets.prometheusAuthUsername }}:{{ .Values.secrets.prometheusAuthPassword }}@{{ include "nexwall.fullname" . }}-api:5000/prometheus/targets"
+            refresh_interval: 60s
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "nexwall.fullname" . }}-prometheus-data
+  labels: {{- include "nexwall.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: {{ .Values.storage.storageClassName }}
+  resources: { requests: { storage: {{ .Values.storage.prometheusSize }} } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nexwall.fullname" . }}-prometheus
+  labels: {{- include "nexwall.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { component: prometheus, tenant-id: "{{ .Values.tenantId }}" }
+  template:
+    metadata:
+      labels:
+        {{- include "nexwall.labels" . | nindent 8 }}
+        component: prometheus
+    spec:
+      containers:
+        - name: prometheus
+          image: {{ .Values.monitoringImages.prometheus }}
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time={{ .Values.monitoring.retentionDays }}d
+            - --web.route-prefix=/prometheus
+            - --web.external-url=https://{{ .Values.subdomain }}/prometheus
+          ports: [{ containerPort: 9090 }]
+          volumeMounts:
+            - { name: config, mountPath: /etc/prometheus }
+            - { name: data, mountPath: /prometheus }
+          resources: {{- toYaml .Values.resources.prometheus | nindent 12 }}
+      volumes:
+        - name: config
+          configMap: { name: {{ include "nexwall.fullname" . }}-prometheus-config }
+        - name: data
+          persistentVolumeClaim: { claimName: {{ include "nexwall.fullname" . }}-prometheus-data }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nexwall.fullname" . }}-prometheus
+  labels: {{- include "nexwall.labels" . | nindent 4 }}
+spec:
+  selector: { component: prometheus, tenant-id: "{{ .Values.tenantId }}" }
+  ports: [{ port: 9090 }]
+{{- end }}

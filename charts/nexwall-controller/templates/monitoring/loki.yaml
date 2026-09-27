@@ -1,0 +1,86 @@
+{{- if .Values.monitoring.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "nexwall.fullname" . }}-loki-config
+  labels: {{- include "nexwall.labels" . | nindent 4 }}
+data:
+  local-config.yaml: |
+    auth_enabled: false
+    server:
+      http_listen_port: 3100
+      grpc_listen_port: 9095
+    common:
+      path_prefix: /loki
+      storage:
+        filesystem:
+          chunks_directory: /loki/chunks
+          rules_directory: /loki/rules
+      replication_factor: 1
+      ring:
+        kvstore: { store: inmemory }
+    schema_config:
+      configs:
+        - from: 2020-10-24
+          store: tsdb
+          object_store: filesystem
+          schema: v13
+          index: { prefix: index_, period: 24h }
+    limits_config:
+      retention_period: {{ .Values.monitoring.retentionDays | mul 24 }}h
+      reject_old_samples: true
+      reject_old_samples_max_age: 168h
+    compactor:
+      working_directory: /loki/compactor
+      retention_enabled: true
+      delete_request_store: filesystem
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "nexwall.fullname" . }}-loki-data
+  labels: {{- include "nexwall.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: {{ .Values.storage.storageClassName }}
+  resources: { requests: { storage: {{ .Values.storage.lokiSize }} } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nexwall.fullname" . }}-loki
+  labels: {{- include "nexwall.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { component: loki, tenant-id: "{{ .Values.tenantId }}" }
+  template:
+    metadata:
+      labels:
+        {{- include "nexwall.labels" . | nindent 8 }}
+        component: loki
+    spec:
+      containers:
+        - name: loki
+          image: {{ .Values.monitoringImages.loki }}
+          args: ["-config.file=/etc/loki/local-config.yaml"]
+          ports: [{ containerPort: 3100 }]
+          volumeMounts:
+            - { name: config, mountPath: /etc/loki }
+            - { name: data, mountPath: /loki }
+          resources: {{- toYaml .Values.resources.loki | nindent 12 }}
+      volumes:
+        - name: config
+          configMap: { name: {{ include "nexwall.fullname" . }}-loki-config }
+        - name: data
+          persistentVolumeClaim: { claimName: {{ include "nexwall.fullname" . }}-loki-data }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nexwall.fullname" . }}-loki
+  labels: {{- include "nexwall.labels" . | nindent 4 }}
+spec:
+  selector: { component: loki, tenant-id: "{{ .Values.tenantId }}" }
+  ports: [{ port: 3100 }]
+{{- end }}

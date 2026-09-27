@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "nexwall.fullname" . }}-db
+  labels:
+    {{- include "nexwall.labels" . | nindent 4 }}
+    component: db
+spec:
+  serviceName: {{ include "nexwall.fullname" . }}-db
+  replicas: 1
+  selector:
+    matchLabels:
+      component: db
+      tenant-id: "{{ .Values.tenantId }}"
+  template:
+    metadata:
+      labels:
+        {{- include "nexwall.labels" . | nindent 8 }}
+        component: db
+    spec:
+      containers:
+        - name: db
+          image: {{ .Values.monitoringImages.timescaledb }}
+          env:
+            - name: POSTGRES_USER
+              value: report
+            - name: POSTGRES_PASSWORD
+              value: {{ .Values.secrets.postgresPassword | quote }}
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+          resources:
+            {{- toYaml .Values.resources.db | nindent 12 }}
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "report"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+  volumeClaimTemplates:
+    - metadata:
+        name: pgdata
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: {{ .Values.storage.storageClassName }}
+        resources:
+          requests:
+            storage: {{ .Values.storage.dbSize }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nexwall.fullname" . }}-db
+  labels:
+    {{- include "nexwall.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    component: db
+    tenant-id: "{{ .Values.tenantId }}"
+  ports:
+    - port: 5432

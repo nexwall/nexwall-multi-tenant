@@ -1,0 +1,38 @@
+name: management-plane-ci
+
+on:
+  pull_request:
+    paths:
+      - 'management-plane/**'
+  push:
+    branches: [main]
+    paths:
+      - 'management-plane/**'
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: management-plane
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: management-plane/go.sum
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: go test
+        run: go test ./... -v
+
+      - name: openapi contract lint
+        uses: char0n/swagger-editor-validate@v1
+        with:
+          definition-file: docs/contracts/management-plane-openapi.yaml

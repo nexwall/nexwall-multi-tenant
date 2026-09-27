@@ -1,0 +1,8 @@
+apiVersion: v2
+name: nexwall-controller
+description: One isolated Nexwall Controller stack (vpn, db, api, ui, proxy, loki, promtail, prometheus, grafana) for one tenant.
+type: application
+version: 0.1.0
+appVersion: "main"
+maintainers:
+  - name: Nexwall

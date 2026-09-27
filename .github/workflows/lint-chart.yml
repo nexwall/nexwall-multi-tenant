@@ -1,0 +1,43 @@
+name: lint-chart
+
+on:
+  pull_request:
+    paths:
+      - 'charts/**'
+  push:
+    branches: [main]
+    paths:
+      - 'charts/**'
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.15.0
+
+      - name: helm lint
+        run: helm lint charts/nexwall-controller
+
+      - name: helm template (render with a dummy tenant, catch syntax errors)
+        run: |
+          cat > /tmp/values-ci.yaml <<'EOF'
+          tenantId: 999
+          slug: ci-test
+          vpnCidr: 10.199.0.0/16
+          vpnPort: 20999
+          subdomain: ci-test.painel.nexwall.com.br
+          adminEmail: ci@nexwall.com.br
+          EOF
+          helm template ci-test charts/nexwall-controller -f /tmp/values-ci.yaml > /tmp/rendered.yaml
+
+      - name: validate against schema
+        run: |
+          helm template ci-test charts/nexwall-controller -f /tmp/values-ci.yaml --dry-run
+
+      - uses: instrumenta/kubeval-action@master
+        with:
+          files: /tmp/rendered.yaml

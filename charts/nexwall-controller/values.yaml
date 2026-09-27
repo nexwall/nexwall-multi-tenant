@@ -1,0 +1,60 @@
+# Per-tenant overrides go in a values-<slug>.yaml passed at install time.
+# See values.schema.json for what's required.
+
+tenantId: 0
+slug: ""
+vpnCidr: ""
+vpnPort: 0
+subdomain: ""
+adminEmail: ""
+
+image:
+  registry: ghcr.io
+  owner: nexwall
+  tag: main
+  pullPolicy: IfNotPresent
+
+# Read-only mirror of upstream (docker.io) images used for monitoring —
+# same versions validated in the single-VM dev environment.
+monitoringImages:
+  loki: docker.io/grafana/loki:2.9.8
+  promtail: docker.io/grafana/promtail:2.9.8
+  prometheus: docker.io/prom/prometheus:v2.54.1
+  grafana: docker.io/grafana/grafana:11.2.0
+  timescaledb: docker.io/timescale/timescaledb:latest-pg16
+
+monitoring:
+  enabled: true
+  retentionDays: 15
+
+storage:
+  storageClassName: local-path # k3s default; revisit before real multi-node HA
+  dbSize: 5Gi
+  ovpnSize: 256Mi
+  lokiSize: 5Gi
+  prometheusSize: 5Gi
+  grafanaSize: 256Mi
+
+resources:
+  api:      { requests: { cpu: 50m,  memory: 64Mi },  limits: { cpu: 500m, memory: 256Mi } }
+  ui:       { requests: { cpu: 25m,  memory: 32Mi },  limits: { cpu: 200m, memory: 128Mi } }
+  proxy:    { requests: { cpu: 25m,  memory: 32Mi },  limits: { cpu: 200m, memory: 128Mi } }
+  vpn:      { requests: { cpu: 25m,  memory: 32Mi },  limits: { cpu: 200m, memory: 128Mi } }
+  db:       { requests: { cpu: 100m, memory: 256Mi }, limits: { cpu: 1,    memory: 1Gi } }
+  loki:     { requests: { cpu: 25m,  memory: 64Mi },  limits: { cpu: 300m, memory: 256Mi } }
+  promtail: { requests: { cpu: 25m,  memory: 32Mi },  limits: { cpu: 100m, memory: 64Mi } }
+  prometheus: { requests: { cpu: 50m, memory: 128Mi }, limits: { cpu: 500m, memory: 512Mi } }
+  grafana:  { requests: { cpu: 25m,  memory: 64Mi },  limits: { cpu: 300m, memory: 256Mi } }
+
+# Rendered into a Secret; override via --set-file or a sealed-secrets/external-secrets
+# source in real deployments. These are NOT safe defaults for production.
+secrets:
+  adminUsername: admin
+  adminPassword: CHANGE_ME
+  secretJwt: CHANGE_ME
+  encryptionKey: CHANGE_ME_32_BYTES_EXACTLY_XXXXXX
+  registrationToken: CHANGE_ME
+  grafanaAdminPassword: CHANGE_ME
+  postgresPassword: CHANGE_ME
+  prometheusAuthUsername: prometheus
+  prometheusAuthPassword: CHANGE_ME
