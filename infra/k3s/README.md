@@ -22,3 +22,14 @@ kubectl taint nodes <master-node-name> node-role.kubernetes.io/master=:NoSchedul
 
 - HA control-plane (3 masters) — Phase 4.
 - Terraform/IaC for VM provisioning itself — VMs are created by hand for now; the 2 starting VMs already exist outside this repo's scope.
+
+## Real deployment notes (from the actual master + slave1 setup)
+
+- **Node IP / internal network**: cluster nodes talk to each other over a dedicated private interface (`ens34`, `10.10.1.0/24`), not the VM's public-facing interface. Every node's `/etc/rancher/k3s/config.yaml` sets `node-ip` (its `10.10.1.x` address), `node-external-ip` (its `192.168.0.x` address, unused by the cluster itself today but kept for visibility), and `flannel-iface: ens34`. Workers join via `server: https://10.10.1.<master>:6443`, not the public/external address.
+- **Taint does not survive a k3s restart**: `node-taint` in `config.yaml` is a first-registration-only setting. After *any* restart of the master's `k3s` service (including a VM reboot), check and reapply:
+  ```
+  kubectl describe node <master> | grep Taints
+  kubectl taint nodes <master> node-role.kubernetes.io/control-plane=:NoSchedule --overwrite
+  ```
+  This does not evict already-running pods that lack a toleration (they keep running); it only blocks *new* scheduling. So a missed re-taint after a reboot is a silent risk (a tenant could get scheduled onto the master), not an immediate outage — but it should be checked every time.
+- **Public entry point**: see `docs/adr/0005-public-entry-point-wireguard-nginx.md` — the cluster has no public IP of its own. A separate VPS reaches the master over WireGuard (`10.200.1.0/24`) and nginx there reverse-proxies to the master's Traefik.
