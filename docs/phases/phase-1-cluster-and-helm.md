@@ -2,6 +2,24 @@
 
 **Status**: In progress — k3s is up (see ADR 0001 addendum for real deployment
 notes), chart skeleton exists, first pilot install not yet done.
+**Progress update (2026-09-28)** — first tenant `demo` (tenantId 1) is
+installed on the real cluster (master + slave1): 8/8 containers, 0 restarts
+after `helm upgrade` (rev 2), admin login OK through the Ingress, Grafana
+datasources (Prometheus/Loki/TimescaleDB) healthy, dashboards present with the
+UIDs the UI links to. Effect on the tasks below:
+
+- **1.3.a superseded** — there is no separate proxy Deployment any more; the
+  proxy hardcodes `127.0.0.1` upstreams, so the whole stack became one Pod
+  (ADR 0007). The env vars listed there do not exist.
+- **1.3.b done** — dashboards are a ConfigMap (`charts/.../dashboards/`).
+- **1.3.c resolved by design, not yet proven with a real unit** — promtail now
+  shares the tunnel's netns and listens on `<vpn-cidr>.0.1:1514`. Remaining
+  acceptance: connect a real firewall through the VPS and see its logs in Loki.
+- **1.3.d still open** (secrets mechanism); the demo values file lives only on
+  the master (`/root/values-tenant-1-demo.yaml`, mode 600), not in git.
+- **1.4 partially done** — installed by hand, but no real unit registered yet;
+  blocked on the VPS DNAT for the tenant's UDP port and on DNS.
+
 **Goal**: k3s running on both VMs, one real customer stack deployed and
 reachable through it — no Management Plane yet, tenant created by hand.
 **Repos touched**: this repo only (`infra/`, `charts/nexwall-controller/`).
@@ -133,7 +151,7 @@ work. Four concrete TODOs remain, each independently completable:
   external-secrets-operator source (more infrastructure, better hygiene).
   No existing pattern to reuse — single-tenant NethSecurity has no concept
   of "many tenants' secrets managed from one place." This decision should
-  be made once, documented as an ADR addendum or a new ADR 0006, and then
+  be made once, documented as an ADR addendum or a new ADR (next free number), and then
   applied consistently — don't let it be decided ad hoc per tenant.
 
 ---

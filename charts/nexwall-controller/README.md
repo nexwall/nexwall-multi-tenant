@@ -1,6 +1,6 @@
 # nexwall-controller Helm chart
 
-One `helm install` = one fully isolated tenant. See `docs/adr/0006-one-pod-per-tenant.md` for why the stack is a single multi-container Pod (plus a separate TimescaleDB StatefulSet) and not one Deployment per component.
+One `helm install` = one fully isolated tenant. See `docs/adr/0007-one-pod-per-tenant.md` for why the stack is a single multi-container Pod (plus a separate TimescaleDB StatefulSet) and not one Deployment per component.
 
 ## Layout
 

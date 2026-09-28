@@ -1,4 +1,4 @@
-# ADR 0006: One multi-container Pod per tenant (not one Deployment per component)
+# ADR 0007: One multi-container Pod per tenant (not one Deployment per component)
 
 **Status**: Accepted — validated on the real cluster (tenant `demo`, revision 2, 8/8 containers, 0 restarts)
 
