@@ -6,7 +6,7 @@ Implements `docs/contracts/management-plane-openapi.yaml`. See `docs/adr/0003-ma
 
 - `POST /api/tenants` allocates a `tenant_id`, VPN CIDR/port (`docs/adr/0004`), and a subdomain — but does **not** yet call k8s. `internal/k8s/client.go` is a stub (`panic("not implemented")`) intentionally, so wiring it up is a clear, isolated next step.
 - Storage is in-memory (`internal/tenant/memstore.go`) — replace with Postgres before anything but local dev.
-- No real auth — a single shared `MGMT_API_KEY` env var, checked by a middleware in `main.go`. Fine for one operator; not fine once more than one person touches this. See `docs/phases/phase-4-scale-ha-billing.md` for proper SSO.
+- No real auth — a single shared `MGMT_API_KEY` env var, checked by a middleware in `main.go`. Fine for internal operators. Partner-facing SSO/billing does not live here — see `docs/adr/0006-partner-program-separate-service.md`. Note the Partner Program will need its own dedicated key before it calls this API.
 
 ## Run locally
 

@@ -1,13 +1,19 @@
-# Phase 4 — Scale-out, HA, billing
+# Phase 4 — Scale-out and HA
+
+(Filename keeps `billing` for link stability; billing/SSO moved out, see ADR 0006.)
 
 **Status**: Not started — correctly deferred until Phase 1–3 give real
 operational data (per-tenant actual resource usage, real customer count) to
 size these decisions against, rather than guessing now.
 **Goal**: production posture for real growth, not just "it works."
-**Repos touched**: this repo (`infra/`, new platform-observability chart),
-`management-plane/` (SSO, billing).
+**Repos touched**: this repo only (`infra/`, new platform-observability chart).
 **Reference material**: `multi-tenant-design/my-nethesis-reference.md` in
-`dev-nethsec-reference` is directly relevant to 4.3 and 4.6 below.
+`dev-nethsec-reference` is directly relevant to 4.4 below.
+
+> **Scope change (ADR 0006)**: SSO and billing are no longer part of this
+> repo. They belong to `nexwall-partner-multitenant` (the Partner Program,
+> `partner.nexwall.com.br`, separate cluster). See the section "Moved out of
+> this phase" below.
 
 ---
 
@@ -40,57 +46,25 @@ size these decisions against, rather than guessing now.
   through explicitly rather than defaulting to "reuse the VPS for
   everything."
 
-## 4.3 — Proper SSO for the Management Plane
+## Moved out of this phase
 
-- **Study**: `NethServer/my`'s `DESIGN.md` in full — the token-exchange flow
-  diagram at the top (`Vue Frontend → Logto IdP → Access Token → POST
-  /auth/exchange → Go Backend → Custom JWT → Frontend`) is exactly the
-  shape needed here: an external IdP handles login, the backend mints its
-  own JWT embedding RBAC claims rather than passing the IdP's raw token
-  around everywhere.
-- **Reimplement** (pattern, not code — same AGPL caveat as Phase 2.2
-  applies, `my`'s backend is AGPL-3.0): the token-exchange endpoint and JWT-
-  embedding approach. IdP choice is open — `my` uses Logto, but nothing
-  about this pattern requires that specific product; Keycloak, Authentik,
-  or Zitadel are equally valid choices and should be evaluated on their own
-  merits (self-hosting story, license, feature fit) rather than copying
-  Nethesis's vendor choice by default.
-- **Build new**: the RBAC role/permission model itself. `my`'s
-  Owner→Distributor→Reseller→Customer hierarchy is *their* business
-  hierarchy (Nethesis is the Owner of a multi-level channel business) — our
-  own MSP structure may be simpler (likely just "MSP staff" with maybe
-  Admin/Support-style technical roles, no reseller channel to model unless
-  Nexwall itself grows a reseller program). Don't import `my`'s full org
-  hierarchy wholesale; design our own roles against our actual org
-  structure, using `my`'s *separation* of organization-role permissions
-  from user-role permissions as the useful idea, not their specific role
-  names.
+**SSO and billing** (previously 4.3 and 4.4) now live in
+`nexwall-partner-multitenant`, per `docs/adr/0006-partner-program-separate-
+service.md`. What stays relevant to this repo:
 
-**Acceptance criteria**: MSP staff have individual accounts (no more shared
-`MGMT_API_KEY`), and every Management Plane action is attributable to a
-specific person in an audit log.
+- `management-plane`'s static `MGMT_API_KEY` remains adequate for internal
+  operators. Optional hardening (individual operator accounts + audit log)
+  is a nice-to-have here, not a phase exit requirement.
+- **Required before the Partner Program's first real call**: issue a
+  dedicated, independently rotatable API key to `nexwall-partner-
+  multitenant` — do not reuse the key operators type by hand. This is a
+  small task (env var + middleware already exist), but it must land before
+  integration, not after.
+- The `nexwall-license` package / `license.nexwall.com.br` question (fold
+  into a Postgres-backed store vs. stay a separate service) is now a
+  Partner Program decision, since entitlements live there.
 
-## 4.4 — Billing integration
-
-- **Build new**: entirely new — wire the `plan`/usage metadata already
-  modeled in the Management Plane's Postgres store (Phase 2.2) to an actual
-  billing provider (Stripe or a Brazil-specific provider given the
-  `.com.br` domain and infrastructure already in place — worth checking
-  what the existing `license.nexwall.com.br` subdomain, referenced in ADR
-  0005, already integrates with, since that may already have a billing/
-  payment relationship that should be reused rather than standing up a
-  second one).
-- **Study**: `NethServer/my`'s `entitlements.go` for the *concept* of tying
-  subscription/plan state directly into the same system-of-record as
-  tenant/system data, rather than a fully separate billing microservice —
-  worth considering whether `firewall-msp`'s existing `nexwall-license`
-  package (which already talks to `license.nexwall.com.br`) should be
-  folded into the Management Plane's own data model at this point, now that
-  a real Postgres store exists (Phase 2.2), instead of remaining a separate
-  bespoke license server. This is an architecture decision worth its own
-  ADR before implementation starts, not something to decide inline.
-
-## 4.5 — Cost-tier revisit (shared-instance option, ADR 0002 consequence)
+## 4.3 — Cost-tier revisit (shared-instance option, ADR 0002 consequence)
 
 - **Study**: re-read ADR 0002's "Consequences" section — Option A (shared
   instance, logical tenancy, `tenant_id` column everywhere) was explicitly
@@ -106,7 +80,7 @@ specific person in an audit log.
   phase doc when the time comes. Do not start this speculatively before the
   50+ customer threshold is actually approached.
 
-## 4.6 — Platform observability (cluster-level, not per-tenant)
+## 4.4 — Platform observability (cluster-level, not per-tenant)
 
 - **Study**: `NethServer/my`'s `services/mimir/` — this is the direct
   answer to the gap our own `ROADMAP.md` flags under "Explicitly not
@@ -145,14 +119,12 @@ specific person in an audit log.
 
 ## Order of execution
 
-4.1 and 4.2 are infrastructure and can proceed independently of the rest.
-4.3 should land before or alongside 4.4 (billing needs attributable users
-for audit trails). 4.5 and 4.6's cross-tenant half both depend on a real
-"is this needed yet" decision — don't schedule them by default, schedule
-them when their trigger condition (50+ customers; a real cross-tenant
-reporting request) actually occurs.
+4.1 and 4.2 are infrastructure and can proceed independently. 4.3 and 4.4's
+cross-tenant half both depend on a real "is this needed yet" decision — don't
+schedule them by default; schedule them when their trigger condition (50+
+customers; a real cross-tenant reporting request) actually occurs.
 
-**Acceptance criteria (= Phase 4 exit criteria, unchanged)**: no single VM's
-failure takes down more than its own workload; onboarding, billing, and
-support are run by non-engineers through the Management Plane and a billing
-dashboard, not through `kubectl`.
+**Acceptance criteria (= Phase 4 exit criteria)**: no single VM's failure
+takes down more than its own workload. Onboarding and billing are handled by
+the Partner Program (`nexwall-partner-multitenant`), which calls this
+repo's Management Plane API — operators no longer use `kubectl` for either.

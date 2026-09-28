@@ -117,9 +117,12 @@ don't assume.
 
 **Status: done, already in `main.go`.** A single `MGMT_API_KEY` env var,
 checked in middleware. Nothing to build here for Phase 2 — explicitly
-deferred to Phase 4 (`docs/phases/phase-4-scale-ha-billing.md`, "Proper
-SSO"). Do not scope-creep this into Phase 2; the `my`-based JWT/RBAC pattern
-referenced there is real work, not a quick add.
+adequate for internal operators indefinitely (ADR 0006 moved partner-
+facing SSO/RBAC to `nexwall-partner-multitenant`). Do not scope-creep
+accounts/RBAC into this service. One addition IS required before the
+Partner Program integrates: support a second, dedicated API key (e.g.
+`PARTNER_API_KEY`) so the Partner Program never shares the key operators
+use by hand.
 
 ---
 
@@ -137,8 +140,8 @@ suspends a non-paying customer without touching `kubectl` directly.
 ## Carries into later phases
 
 - The `Store` interface from 2.2, once Postgres-backed, is the natural home
-  for Phase 4's billing/plan metadata — no redesign expected, just new
-  columns/fields.
+  for any plan metadata `management-plane` itself needs; billing and
+  entitlements live in `nexwall-partner-multitenant` (ADR 0006).
 - 2.1's namespace-per-tenant provisioning is the foundation Phase 3's
   `helm upgrade` rollout (for the group-policy feature, once built in
   `nexwall-controller`) reuses unchanged.
