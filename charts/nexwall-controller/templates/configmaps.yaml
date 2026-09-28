@@ -1,0 +1,206 @@
+{{- $fn := include "nexwall.fullname" . -}}
+# Everything here runs in ONE pod (see controller.yaml), sharing a network
+# namespace — exactly like the podman pod in nexwall-controller's dev.sh.
+# That is why every upstream address below is 127.0.0.1.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fn }}-routes
+  labels:
+    {{- include "nexwall.labels" . | nindent 4 }}
+{{- if .Values.monitoring.enabled }}
+data:
+  # Extra Traefik file-provider routes, copied into the proxy's watched dir
+  # (/etc/openvpn/proxy) by the route-files initContainer.
+  grafana.yaml: |
+    http:
+      routers:
+        routergrafana:
+          entryPoints:
+          - web
+          service: service-grafana
+          rule: PathPrefix(`/grafana`)
+      services:
+        service-grafana:
+          loadBalancer:
+            servers:
+            - url: http://127.0.0.1:3009/
+            passHostHeader: true
+  prometheus.yaml: |
+    http:
+      routers:
+        routerprometheus:
+          entryPoints:
+          - web
+          service: service-prometheus
+          rule: PathPrefix(`/prometheus`)
+      services:
+        service-prometheus:
+          loadBalancer:
+            servers:
+            - url: http://127.0.0.1:9090/
+            passHostHeader: true
+{{- end }}
+{{- if .Values.monitoring.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fn }}-loki-config
+  labels:
+    {{- include "nexwall.labels" . | nindent 4 }}
+data:
+  local-config.yaml: |
+    auth_enabled: false
+    server:
+      http_listen_port: 3100
+      grpc_listen_port: 9095
+    common:
+      path_prefix: /loki
+      storage:
+        filesystem:
+          chunks_directory: /loki/chunks
+          rules_directory: /loki/rules
+      replication_factor: 1
+      ring:
+        kvstore:
+          store: inmemory
+    schema_config:
+      configs:
+        - from: 2020-10-24
+          store: tsdb
+          object_store: filesystem
+          schema: v13
+          index:
+            prefix: index_
+            period: 24h
+    limits_config:
+      retention_period: {{ mul .Values.monitoring.logsRetentionDays 24 }}h
+      reject_old_samples: true
+      reject_old_samples_max_age: 168h
+    compactor:
+      working_directory: /loki/compactor
+      retention_enabled: true
+      delete_request_store: filesystem
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fn }}-promtail-config
+  labels:
+    {{- include "nexwall.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    server:
+      http_listen_port: 9080
+      grpc_listen_port: 0
+    positions:
+      filename: /tmp/positions.yaml
+    clients:
+      - url: http://127.0.0.1:3100/loki/api/v1/push
+    scrape_configs:
+      - job_name: syslog
+        syslog:
+          # Bound to the tunnel address: only VPN-connected units can reach it.
+          # Units send RFC5424 over TCP with octet-counted framing (see ns-plug).
+          listen_address: {{ include "nexwall.vpnServerIP" . }}:1514
+          listen_protocol: tcp
+          idle_timeout: 60s
+          label_structured_data: true
+          labels:
+            job: syslog
+            controller_name: {{ .Values.slug }}
+        relabel_configs:
+          - source_labels: ['__syslog_message_hostname']
+            target_label: hostname
+          - source_labels: ['__syslog_message_severity']
+            target_label: level
+          - source_labels: ['__syslog_message_app_name']
+            target_label: application
+          - source_labels: ['__syslog_message_facility']
+            target_label: facility
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fn }}-prometheus-config
+  labels:
+    {{- include "nexwall.labels" . | nindent 4 }}
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 30s
+      evaluation_interval: 30s
+    scrape_configs:
+      - job_name: prometheus
+        # --web.route-prefix=/prometheus moves /metrics under the prefix too
+        metrics_path: /prometheus/metrics
+        static_configs:
+          - targets: ['127.0.0.1:9090']
+      - job_name: loki
+        static_configs:
+          - targets: ['127.0.0.1:3100']
+      - job_name: node
+        http_sd_configs:
+          - url: "http://{{ .Values.secrets.prometheusAuthUsername }}:{{ .Values.secrets.prometheusAuthPassword }}@127.0.0.1:5000/prometheus/targets"
+            refresh_interval: 60s
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fn }}-grafana-provisioning
+  labels:
+    {{- include "nexwall.labels" . | nindent 4 }}
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        uid: Prometheus
+        type: prometheus
+        access: proxy
+        # must include the route prefix Prometheus is started with
+        url: http://127.0.0.1:9090/prometheus
+        isDefault: true
+        jsonData:
+          timeInterval: 30s
+      - name: Loki
+        uid: Loki
+        type: loki
+        access: proxy
+        url: http://127.0.0.1:3100
+      - name: TimescaleDB
+        uid: TimescaleDB
+        type: postgres
+        access: proxy
+        url: {{ $fn }}-db:5432
+        database: report
+        user: grafana
+        secureJsonData:
+          password: {{ .Values.secrets.postgresPassword | quote }}
+        jsonData:
+          sslmode: disable
+          postgresVersion: 1600
+          timescaledb: true
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: nexwall-dashboards
+        orgId: 1
+        folder: ''
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 30
+        options:
+          path: /etc/grafana/dashboards-json
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fn }}-grafana-dashboards
+  labels:
+    {{- include "nexwall.labels" . | nindent 4 }}
+data:
+{{ (.Files.Glob "dashboards/*.json").AsConfig | indent 2 }}
+{{- end }}

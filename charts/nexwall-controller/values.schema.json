@@ -2,20 +2,55 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "nexwall-controller tenant values",
   "type": "object",
-  "required": ["tenantId", "slug", "vpnCidr", "vpnPort", "subdomain", "image"],
+  "required": [
+    "tenantId",
+    "slug",
+    "vpnCidr",
+    "vpnPort",
+    "subdomain",
+    "image"
+  ],
   "properties": {
-    "tenantId": { "type": "integer", "minimum": 1 },
-    "slug": { "type": "string", "pattern": "^[a-z0-9-]{3,32}$" },
-    "vpnCidr": { "type": "string", "pattern": "^10\\.[0-9]+\\.0\\.0/16$" },
-    "vpnPort": { "type": "integer", "minimum": 20000, "maximum": 20999 },
-    "subdomain": { "type": "string" },
+    "tenantId": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]{3,32}$"
+    },
+    "vpnCidr": {
+      "type": "string",
+      "pattern": "^10\\.[0-9]+\\.0\\.0/16$"
+    },
+    "vpnPort": {
+      "type": "integer",
+      "minimum": 20000,
+      "maximum": 20999
+    },
+    "subdomain": {
+      "type": "string"
+    },
     "image": {
       "type": "object",
-      "required": ["registry", "owner", "tag"],
+      "required": [
+        "registry",
+        "owner",
+        "tag"
+      ],
       "properties": {
-        "registry": { "type": "string", "default": "ghcr.io" },
-        "owner": { "type": "string", "default": "nexwall" },
-        "tag": { "type": "string", "default": "main" }
+        "registry": {
+          "type": "string",
+          "default": "ghcr.io"
+        },
+        "owner": {
+          "type": "string",
+          "default": "nexwall"
+        },
+        "tag": {
+          "type": "string",
+          "default": "main"
+        }
       }
     },
     "resources": {
@@ -26,10 +61,47 @@
     "monitoring": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean", "default": true },
-        "retentionDays": { "type": "integer", "default": 15 }
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "retentionDays": {
+          "type": "integer",
+          "default": 15
+        },
+        "logsRetentionDays": {
+          "type": "integer",
+          "default": 180
+        }
       }
     },
-    "adminEmail": { "type": "string", "format": "email" }
+    "adminEmail": {
+      "type": "string",
+      "format": "email"
+    },
+    "ingress": {
+      "type": "object",
+      "properties": {
+        "className": {
+          "type": "string",
+          "default": "traefik"
+        },
+        "tls": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "clusterIssuer": {
+              "type": "string"
+            },
+            "secretName": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
   }
 }

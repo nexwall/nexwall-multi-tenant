@@ -1,12 +1,13 @@
+{{- $fn := include "nexwall.fullname" . -}}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: {{ include "nexwall.fullname" . }}-db
+  name: {{ $fn }}-db
   labels:
     {{- include "nexwall.labels" . | nindent 4 }}
     component: db
 spec:
-  serviceName: {{ include "nexwall.fullname" . }}-db
+  serviceName: {{ $fn }}-db
   replicas: 1
   selector:
     matchLabels:
@@ -21,11 +22,13 @@ spec:
       containers:
         - name: db
           image: {{ .Values.monitoringImages.timescaledb }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          envFrom:
+            - secretRef:
+                name: {{ $fn }}-db
           env:
-            - name: POSTGRES_USER
-              value: report
-            - name: POSTGRES_PASSWORD
-              value: {{ .Values.secrets.postgresPassword | quote }}
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
           ports:
             - containerPort: 5432
           volumeMounts:
@@ -51,7 +54,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "nexwall.fullname" . }}-db
+  name: {{ $fn }}-db
   labels:
     {{- include "nexwall.labels" . | nindent 4 }}
 spec:

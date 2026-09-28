@@ -25,12 +25,23 @@ monitoringImages:
 
 monitoring:
   enabled: true
-  retentionDays: 15
+  retentionDays: 15      # metrics (prometheus)
+  logsRetentionDays: 180 # logs (loki)
+
+ingress:
+  className: traefik
+  tls:
+    # TLS is terminated at the VPS nginx for now (docs/adr/0005); flip this
+    # on only if the cluster ingress itself should serve certs.
+    enabled: false
+    clusterIssuer: letsencrypt-dns
+    secretName: wildcard-painel-tls
 
 storage:
   storageClassName: local-path # k3s default; revisit before real multi-node HA
   dbSize: 5Gi
   ovpnSize: 256Mi
+  apiDataSize: 256Mi
   lokiSize: 5Gi
   prometheusSize: 5Gi
   grafanaSize: 256Mi

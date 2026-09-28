@@ -1,27 +1,29 @@
+{{- $fn := include "nexwall.fullname" . -}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ include "nexwall.fullname" . }}
+  name: {{ $fn }}
   labels:
     {{- include "nexwall.labels" . | nindent 4 }}
+  {{- if .Values.ingress.tls.enabled }}
   annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-dns
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.tls.clusterIssuer }}
+  {{- end }}
 spec:
-  ingressClassName: traefik
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls.enabled }}
   tls:
     - hosts: [{{ .Values.subdomain }}]
-      secretName: wildcard-painel-tls # shared wildcard cert, see infra/k3s README
+      secretName: {{ .Values.ingress.tls.secretName }}
+  {{- end }}
   rules:
     - host: {{ .Values.subdomain }}
       http:
         paths:
-          # The proxy container already routes /api, /grafana, /prometheus
-          # internally (see nexwall-controller/proxy/entrypoint.sh + the
-          # grafana.yaml/prometheus.yaml route files dropped into its watched
-          # config dir) — so the Ingress only needs one backend: the proxy.
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: {{ include "nexwall.fullname" . }}-proxy
-                port: { number: 8080 }
+                name: {{ $fn }}-web
+                port:
+                  number: 8080

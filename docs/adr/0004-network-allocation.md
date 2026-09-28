@@ -22,3 +22,9 @@ Official NethSecurity docs warn that each controller's OpenVPN network must not 
 - 1000 tenants fit in ports `20000`–`20999` on a single public IP before a second IP is needed — comfortable headroom for the 2-VM starting point and well beyond.
 - HTTP scales independently of the VPN scheme — the Ingress handles unlimited tenants on one IP via SNI/Host routing, no per-tenant port needed.
 - `tenant_id` must be threaded through the Helm chart's `values.yaml` (`vpnCidr`, `vpnPort`, `subdomain`) — see `docs/contracts/` for the schema that enforces this at install time.
+
+## Addendum (found while deploying the first real tenant)
+
+1. **NodePort range**: the scheme above puts VPN NodePorts at `20000+tenant_id`, but k3s only accepts 30000–32767 by default and the Service is rejected. The master must run with `kube-apiserver-arg: service-node-port-range=20000-32767` (in `/etc/rancher/k3s/config.yaml`; see `infra/k3s/README.md`). Verified: `demo` (tenant 1) got `20001/UDP`.
+2. **CIDR scheme caps at 99 tenants, not 1000**: `10.<100+tenant_id>.0.0/16` reaches `10.200.0.0/16` at tenant 100, colliding with the WireGuard network (`10.200.1.0/24`) used to reach the cluster (ADR 0005). Valid range today is `tenant_id` 1–99. Must be redesigned (e.g. smaller per-tenant blocks from a range that avoids 10.10/10.42/10.43/10.200) before the 100th tenant; the Management Plane must refuse to allocate beyond 99 until then.
+3. Verified on the real cluster: OpenVPN bound `:20001/UDP` with pool `10.101.0.2+`, promtail bound `10.101.0.1:1514`.

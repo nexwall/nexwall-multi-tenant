@@ -1,0 +1,348 @@
+{{- $fn := include "nexwall.fullname" . -}}
+{{- $pull := .Values.image.pullPolicy -}}
+# One Pod per tenant, several containers sharing ONE network namespace.
+# This is the faithful translation of the podman pod in nexwall-controller's
+# dev.sh, and it is not optional:
+#   * proxy/entrypoint.sh hardcodes upstreams at 127.0.0.1 (api:5000, ui:3000)
+#   * vpn/handle-connection writes Traefik routes to https://<vpn-ip>:9090/ —
+#     only reachable from the netns that owns the tunnel interface
+#   * units push syslog to the tunnel address, where promtail must listen
+# The database is the exception: it lives in its own StatefulSet.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $fn }}-ovpn-data
+  labels:
+    {{- include "nexwall.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: {{ .Values.storage.storageClassName }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.ovpnSize }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $fn }}-api-data
+  labels:
+    {{- include "nexwall.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: {{ .Values.storage.storageClassName }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.apiDataSize }}
+{{- if .Values.monitoring.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $fn }}-loki-data
+  labels:
+    {{- include "nexwall.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: {{ .Values.storage.storageClassName }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.lokiSize }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $fn }}-prometheus-data
+  labels:
+    {{- include "nexwall.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: {{ .Values.storage.storageClassName }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.prometheusSize }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $fn }}-grafana-data
+  labels:
+    {{- include "nexwall.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: {{ .Values.storage.storageClassName }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.grafanaSize }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fn }}-controller
+  labels:
+    {{- include "nexwall.labels" . | nindent 4 }}
+    component: controller
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # RWO volumes + a single tunnel owner: never two at once
+  selector:
+    matchLabels:
+      component: controller
+      tenant-id: "{{ .Values.tenantId }}"
+  template:
+    metadata:
+      labels:
+        {{- include "nexwall.labels" . | nindent 8 }}
+        component: controller
+    spec:
+      initContainers:
+        # dev.sh created `tunsec` on the host; the vpn image's `ip` is a no-op
+        # shim, so OpenVPN will NOT configure the interface itself. Create it
+        # (persistent tun) and give it the server address inside the pod netns.
+        - name: tun-setup
+          image: docker.io/library/alpine:3.22.5
+          imagePullPolicy: {{ $pull }}
+          securityContext:
+            privileged: true
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              apk add --no-cache iproute2 >/dev/null
+              ip tuntap add dev tunsec mode tun 2>/dev/null || true
+              ip addr replace {{ include "nexwall.vpnServerIP" . }}/16 dev tunsec
+              ip link set dev tunsec up
+              ip -brief addr show tunsec
+        # The api exits if Postgres is unresolvable at boot (a headless Service
+        # has no DNS record until the db pod is Ready — first pull of the
+        # timescaledb image takes minutes). Wait instead of crash-looping.
+        - name: wait-db
+          image: docker.io/library/busybox:1.37
+          imagePullPolicy: {{ $pull }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - until nc -z {{ $fn }}-db 5432; do echo "waiting for {{ $fn }}-db"; sleep 2; done
+        - name: route-files
+          image: docker.io/library/busybox:1.37
+          imagePullPolicy: {{ $pull }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              mkdir -p /etc/openvpn/proxy
+              cp /routes/* /etc/openvpn/proxy/ 2>/dev/null || true
+              ls -la /etc/openvpn/proxy
+          volumeMounts:
+            - name: ovpn-data
+              mountPath: /etc/openvpn
+            - name: routes
+              mountPath: /routes
+      containers:
+        - name: vpn
+          image: {{ include "nexwall.image" (dict "root" $ "component" "vpn") }}
+          imagePullPolicy: {{ $pull }}
+          securityContext:
+            privileged: true
+            capabilities:
+              add: ["NET_ADMIN"]
+          env:
+            - name: OVPN_NETWORK
+              value: {{ include "nexwall.vpnNetwork" . | quote }}
+            - name: OVPN_NETMASK
+              value: "255.255.0.0"
+            - name: OVPN_UDP_PORT
+              value: {{ .Values.vpnPort | quote }}
+          ports:
+            - name: openvpn
+              containerPort: {{ .Values.vpnPort }}
+              protocol: UDP
+          volumeMounts:
+            - name: ovpn-data
+              mountPath: /etc/openvpn
+          resources:
+            {{- toYaml .Values.resources.vpn | nindent 12 }}
+        - name: api
+          image: {{ include "nexwall.image" (dict "root" $ "component" "api") }}
+          imagePullPolicy: {{ $pull }}
+          envFrom:
+            - secretRef:
+                name: {{ $fn }}-api-env
+          ports:
+            - name: api
+              containerPort: 5000
+          volumeMounts:
+            - name: ovpn-data
+              mountPath: /etc/openvpn
+            - name: api-data
+              mountPath: /nethsecurity-api/data
+              subPath: data
+            - name: api-data
+              mountPath: /nethsecurity-api/secrets
+              subPath: secrets
+            - name: api-data
+              mountPath: /nethsecurity-api/tokens
+              subPath: tokens
+            - name: api-data
+              mountPath: /nethsecurity-api/credentials
+              subPath: credentials
+          resources:
+            {{- toYaml .Values.resources.api | nindent 12 }}
+        - name: ui
+          image: {{ include "nexwall.image" (dict "root" $ "component" "ui") }}
+          imagePullPolicy: {{ $pull }}
+          ports:
+            - name: ui
+              containerPort: 3000
+          resources:
+            {{- toYaml .Values.resources.ui | nindent 12 }}
+        - name: proxy
+          image: {{ include "nexwall.image" (dict "root" $ "component" "proxy") }}
+          imagePullPolicy: {{ $pull }}
+          ports:
+            - name: web
+              containerPort: 8080
+          volumeMounts:
+            - name: ovpn-data
+              mountPath: /etc/openvpn
+          resources:
+            {{- toYaml .Values.resources.proxy | nindent 12 }}
+{{- if .Values.monitoring.enabled }}
+        - name: loki
+          image: {{ .Values.monitoringImages.loki }}
+          imagePullPolicy: {{ $pull }}
+          args: ["-config.file=/etc/loki/local-config.yaml"]
+          volumeMounts:
+            - name: loki-config
+              mountPath: /etc/loki
+            - name: loki-data
+              mountPath: /loki
+          resources:
+            {{- toYaml .Values.resources.loki | nindent 12 }}
+        - name: promtail
+          image: {{ .Values.monitoringImages.promtail }}
+          imagePullPolicy: {{ $pull }}
+          args: ["-config.file=/etc/promtail/config.yaml"]
+          volumeMounts:
+            - name: promtail-config
+              mountPath: /etc/promtail
+          resources:
+            {{- toYaml .Values.resources.promtail | nindent 12 }}
+        - name: prometheus
+          image: {{ .Values.monitoringImages.prometheus }}
+          imagePullPolicy: {{ $pull }}
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time={{ .Values.monitoring.retentionDays }}d
+            - --web.route-prefix=/prometheus
+            - --web.external-url={{ include "nexwall.scheme" . }}://{{ .Values.subdomain }}/prometheus
+          volumeMounts:
+            - name: prometheus-config
+              mountPath: /etc/prometheus
+            - name: prometheus-data
+              mountPath: /prometheus
+          resources:
+            {{- toYaml .Values.resources.prometheus | nindent 12 }}
+        - name: grafana
+          image: {{ .Values.monitoringImages.grafana }}
+          imagePullPolicy: {{ $pull }}
+          envFrom:
+            - secretRef:
+                name: {{ $fn }}-grafana
+          env:
+            # 3000 is taken by the ui container in the shared netns
+            - name: GF_SERVER_HTTP_PORT
+              value: "3009"
+            - name: GF_SERVER_SERVE_FROM_SUB_PATH
+              value: "true"
+            - name: GF_SERVER_ROOT_URL
+              value: {{ include "nexwall.scheme" . }}://{{ .Values.subdomain }}/grafana
+            - name: GF_DATE_FORMATS_USE_BROWSER_LOCALE
+              value: "true"
+          volumeMounts:
+            - name: grafana-provisioning
+              mountPath: /etc/grafana/provisioning/datasources/datasources.yaml
+              subPath: datasources.yaml
+            - name: grafana-provisioning
+              mountPath: /etc/grafana/provisioning/dashboards/dashboards.yaml
+              subPath: dashboards.yaml
+            - name: grafana-dashboards
+              mountPath: /etc/grafana/dashboards-json
+            - name: grafana-data
+              mountPath: /var/lib/grafana
+          resources:
+            {{- toYaml .Values.resources.grafana | nindent 12 }}
+{{- end }}
+      volumes:
+        - name: ovpn-data
+          persistentVolumeClaim:
+            claimName: {{ $fn }}-ovpn-data
+        - name: api-data
+          persistentVolumeClaim:
+            claimName: {{ $fn }}-api-data
+        - name: routes
+          configMap:
+            name: {{ $fn }}-routes
+{{- if .Values.monitoring.enabled }}
+        - name: loki-config
+          configMap:
+            name: {{ $fn }}-loki-config
+        - name: loki-data
+          persistentVolumeClaim:
+            claimName: {{ $fn }}-loki-data
+        - name: promtail-config
+          configMap:
+            name: {{ $fn }}-promtail-config
+        - name: prometheus-config
+          configMap:
+            name: {{ $fn }}-prometheus-config
+        - name: prometheus-data
+          persistentVolumeClaim:
+            claimName: {{ $fn }}-prometheus-data
+        - name: grafana-provisioning
+          configMap:
+            name: {{ $fn }}-grafana-provisioning
+        - name: grafana-dashboards
+          configMap:
+            name: {{ $fn }}-grafana-dashboards
+        - name: grafana-data
+          persistentVolumeClaim:
+            claimName: {{ $fn }}-grafana-data
+{{- end }}
+---
+# HTTP entry: the Ingress sends everything to the tenant's Traefik (proxy),
+# which fans out to /api, /ui, /grafana, /prometheus and per-unit routes.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fn }}-web
+  labels:
+    {{- include "nexwall.labels" . | nindent 4 }}
+spec:
+  selector:
+    component: controller
+    tenant-id: "{{ .Values.tenantId }}"
+  ports:
+    - name: web
+      port: 8080
+      targetPort: web
+---
+# Public OpenVPN port for this tenant (docs/adr/0004: 20000+tenant_id).
+# Requires k3s --service-node-port-range to include it (default is 30000+).
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fn }}-vpn
+  labels:
+    {{- include "nexwall.labels" . | nindent 4 }}
+spec:
+  type: NodePort
+  selector:
+    component: controller
+    tenant-id: "{{ .Values.tenantId }}"
+  ports:
+    - name: openvpn
+      protocol: UDP
+      port: {{ .Values.vpnPort }}
+      targetPort: openvpn
+      nodePort: {{ .Values.vpnPort }}
