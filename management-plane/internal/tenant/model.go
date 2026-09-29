@@ -44,6 +44,16 @@ type Tenant struct {
 	Subdomain   string `json:"subdomain"`
 	Namespace   string `json:"namespace"`
 	HelmRelease string `json:"helm_release"`
+	AdminEmail  string `json:"admin_email,omitempty"`
+}
+
+// InClusterWebAddr is the tenant's -web Service DNS name inside the cluster
+// (see charts/nexwall-controller/templates/controller.yaml), what the
+// Management Plane's reverse proxy forwards to once a session picks this
+// tenant. Not the public subdomain (ADR 0004) — that is a separate, optional
+// direct-access path (ADR 0008).
+func (t *Tenant) InClusterWebAddr() string {
+	return "http://" + t.HelmRelease + "-web." + t.Namespace + ".svc.cluster.local:8080"
 }
 
 // CreateRequest mirrors the OpenAPI "TenantCreateRequest" schema.

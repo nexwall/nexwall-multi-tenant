@@ -28,7 +28,7 @@ type Handler struct {
 }
 
 func RegisterRoutes(r *gin.Engine, h *Handler) {
-	g := r.Group("/api")
+	g := r.Group("/_mgmt") // see docs/adr/0008: /api and / are reserved for the tenant reverse proxy
 	g.GET("/tenants", h.listTenants)
 	g.POST("/tenants", h.createTenant)
 	g.GET("/tenants/:id", h.getTenant)

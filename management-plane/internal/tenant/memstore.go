@@ -3,6 +3,7 @@ package tenant
 import (
 	"errors"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -11,17 +12,19 @@ import (
 // exercised end-to-end before Phase 2's real Postgres-backed store exists.
 // Not safe to use beyond local dev — state is lost on restart.
 type MemStore struct {
-	mu      sync.Mutex
-	nextID  int
-	tenants map[int]*Tenant
-	slugs   map[string]bool
+	mu         sync.Mutex
+	nextID     int
+	tenants    map[int]*Tenant
+	slugs      map[string]bool
+	emailIndex map[string][]int // lowercased email -> tenant ids
 }
 
 func NewMemStore() *MemStore {
 	return &MemStore{
-		nextID:  1,
-		tenants: make(map[int]*Tenant),
-		slugs:   make(map[string]bool),
+		nextID:     1,
+		tenants:    make(map[int]*Tenant),
+		slugs:      make(map[string]bool),
+		emailIndex: make(map[string][]int),
 	}
 }
 
@@ -56,6 +59,7 @@ func (s *MemStore) Create(req CreateRequest) (*Tenant, error) {
 	s.nextID++
 	cidr, port := AllocateNetwork(id)
 	t := &Tenant{
+		AdminEmail:  req.AdminEmail,
 		TenantID:    id,
 		Slug:        req.Slug,
 		DisplayName: req.DisplayName,
@@ -70,8 +74,22 @@ func (s *MemStore) Create(req CreateRequest) (*Tenant, error) {
 	}
 	s.tenants[id] = t
 	s.slugs[req.Slug] = true
+	if req.AdminEmail != "" {
+		email := strings.ToLower(req.AdminEmail)
+		s.emailIndex[email] = append(s.emailIndex[email], id)
+	}
 	cp := *t
 	return &cp, nil
+}
+
+// TenantsForEmail returns the tenant IDs an email is known to belong to.
+// Today this is only populated at provisioning time (the tenant's initial
+// admin_email) — see the "open item" in docs/adr/0008 about users created
+// later inside a tenant not yet syncing back here.
+func (s *MemStore) TenantsForEmail(email string) []int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]int(nil), s.emailIndex[strings.ToLower(email)]...)
 }
 
 func (s *MemStore) Delete(id int) error {

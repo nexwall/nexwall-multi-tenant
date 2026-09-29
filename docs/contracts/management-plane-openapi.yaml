@@ -4,10 +4,13 @@ info:
   version: 0.1.0-draft
   description: >
     Provisions and manages isolated nexwall-controller instances (tenants)
-    across the k3s cluster. Does not proxy into any tenant's own controller
-    API — see docs/adr/0003.
+    across the k3s cluster. This admin/provisioning surface. Mounted at
+    /_mgmt, not /api: docs/adr/0008 reserves /api and / on this same host
+    for the per-session reverse proxy into whichever tenant a browser is
+    logged into (POST /login, GET /, etc. — not part of this OpenAPI doc,
+    since they are dynamic passthrough, not a fixed contract).
 servers:
-  - url: https://mgmt.painel.nexwall.com.br/api
+  - url: https://painel.nexwall.com.br/_mgmt
 
 security:
   - ApiKeyAuth: []
