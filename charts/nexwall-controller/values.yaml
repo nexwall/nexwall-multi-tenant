@@ -60,7 +60,6 @@ resources:
 # Rendered into a Secret; override via --set-file or a sealed-secrets/external-secrets
 # source in real deployments. These are NOT safe defaults for production.
 secrets:
-  adminUsername: admin
   adminPassword: CHANGE_ME
   secretJwt: CHANGE_ME
   encryptionKey: CHANGE_ME_32_BYTES_EXACTLY_XXXXXX
