@@ -1,0 +1,12 @@
+FROM docker.io/library/golang:1.26.8 AS build
+WORKDIR /build
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /management-plane .
+
+FROM gcr.io/distroless/static-debian12
+COPY --from=build /management-plane /management-plane
+USER nonroot:nonroot
+EXPOSE 8090
+ENTRYPOINT ["/management-plane"]

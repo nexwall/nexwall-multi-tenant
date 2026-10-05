@@ -1,0 +1,83 @@
+# Platform-level deployment (not per-tenant) of the Management Plane itself.
+# See docs/adr/0008-single-domain-identity-routing.md and
+# management-plane/README.md.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mgmt-plane
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: management-plane
+  namespace: mgmt-plane
+type: Opaque
+stringData:
+  MGMT_API_KEY: 524ae7cda4f005866f9179e6c50cfd65
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: management-plane
+  namespace: mgmt-plane
+  labels:
+    app: management-plane
+spec:
+  replicas: 1 # in-memory session store: stays 1 until docs/adr/0008's session-store TODO is resolved
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: management-plane
+  template:
+    metadata:
+      labels:
+        app: management-plane
+    spec:
+      containers:
+        - name: management-plane
+          image: ghcr.io/nexwall/management-plane:main
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - secretRef:
+                name: management-plane
+          ports:
+            - containerPort: 8090
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8090 }
+            initialDelaySeconds: 3
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { cpu: 300m, memory: 128Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: management-plane
+  namespace: mgmt-plane
+spec:
+  selector:
+    app: management-plane
+  ports:
+    - port: 8090
+---
+# The one entry point for the bare domain (no subdomain). Tenant subdomains
+# (charts/nexwall-controller/templates/ingress.yaml) are separate Ingress
+# objects per tenant namespace and are unaffected by this one.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: management-plane
+  namespace: mgmt-plane
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: painel.nexwall.com.br
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: management-plane
+                port: { number: 8090 }
