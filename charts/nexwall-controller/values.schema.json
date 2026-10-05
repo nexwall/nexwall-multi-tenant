@@ -102,6 +102,10 @@
           }
         }
       }
+    },
+    "handoffSecret": {
+      "type": "string",
+      "description": "HMAC secret for the ADR 0001 (nexwall-controller) / ADR 0009 (this repo) SSO handoff. Generated at provisioning by the Management Plane, never a user-supplied default."
     }
   }
 }
