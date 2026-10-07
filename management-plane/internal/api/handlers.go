@@ -21,14 +21,21 @@ type Store interface {
 	Create(req tenant.CreateRequest) (*tenant.Tenant, error)
 	Delete(id int) error
 	SetStatus(id int, status tenant.Status) error
+	HandoffSecret(id int) (string, error)
 }
 
 type Handler struct {
 	Store Store
 }
 
-func RegisterRoutes(r *gin.Engine, h *Handler) {
-	g := r.Group("/_mgmt") // see docs/adr/0008: /api and / are reserved for the tenant reverse proxy
+// RegisterRoutes mounts the admin/provisioning API onto a group the caller
+// has already attached auth middleware to (see main.go) — this function
+// must never call r.Group itself. An earlier version did exactly that,
+// creating a second, middleware-less "/_mgmt" group that silently shadowed
+// nothing and left every route below completely unauthenticated despite
+// MGMT_API_KEY appearing to be configured. Found during the ADR 0009 work,
+// fixed here; see the commit message for how it was found.
+func RegisterRoutes(g *gin.RouterGroup, h *Handler) {
 	g.GET("/tenants", h.listTenants)
 	g.POST("/tenants", h.createTenant)
 	g.GET("/tenants/:id", h.getTenant)
@@ -36,6 +43,14 @@ func RegisterRoutes(r *gin.Engine, h *Handler) {
 	g.GET("/tenants/:id/status", h.tenantStatus)
 	g.POST("/tenants/:id/suspend", h.suspendTenant)
 	g.POST("/tenants/:id/resume", h.resumeTenant)
+}
+
+// RegisterPartnerRoutes mounts the one endpoint nexwall-partner-multitenant
+// is allowed to call, on a group gated by PARTNER_API_KEY specifically --
+// deliberately not reachable via MGMT_API_KEY, and not part of
+// RegisterRoutes above. See docs/adr/0009-handoff-secret-provisioning.md.
+func RegisterPartnerRoutes(g *gin.RouterGroup, h *Handler) {
+	g.GET("/tenants/:id/handoff-secret", h.handoffSecret)
 }
 
 func (h *Handler) listTenants(c *gin.Context) {
@@ -123,6 +138,19 @@ func (h *Handler) resumeTenant(c *gin.Context) {
 	}
 	t, _ := h.Store.Get(id)
 	c.JSON(http.StatusOK, t)
+}
+
+func (h *Handler) handoffSecret(c *gin.Context) {
+	id, ok := parseID(c)
+	if !ok {
+		return
+	}
+	secret, err := h.Store.HandoffSecret(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "tenant not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"tenant_id": id, "handoff_secret": secret})
 }
 
 func parseID(c *gin.Context) (int, bool) {

@@ -14,6 +14,7 @@ metadata:
 type: Opaque
 stringData:
   MGMT_API_KEY: 524ae7cda4f005866f9179e6c50cfd65
+  PARTNER_API_KEY: e17c6de9412a0e1e84e4f3a6b2007db0
 ---
 apiVersion: apps/v1
 kind: Deployment

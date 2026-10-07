@@ -45,6 +45,12 @@ type Tenant struct {
 	Namespace   string `json:"namespace"`
 	HelmRelease string `json:"helm_release"`
 	AdminEmail  string `json:"admin_email,omitempty"`
+
+	// HandoffSecret: ADR 0009. json:"-" is load-bearing, not decoration --
+	// this must never appear in a GET /_mgmt/tenants response. The only
+	// legitimate reader is GET /_mgmt/tenants/:id/handoff-secret, gated by
+	// PARTNER_API_KEY, not the general MGMT_API_KEY.
+	HandoffSecret string `json:"-"`
 }
 
 // InClusterWebAddr is the tenant's -web Service DNS name inside the cluster

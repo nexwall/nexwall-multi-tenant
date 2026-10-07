@@ -2,11 +2,13 @@ package auth
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -19,6 +21,7 @@ import (
 type TenantLookup interface {
 	TenantsForEmail(email string) []int
 	Get(id int) (*tenant.Tenant, error)
+	GetBySlug(slug string) (*tenant.Tenant, error)
 }
 
 type Handler struct {
@@ -140,6 +143,99 @@ func (h *Handler) loginAgainstTenant(t *tenant.Tenant, email, password string) (
 		return "", err
 	}
 	return out.Token, nil
+}
+
+// GET /sso/handoff?token=...&tenant=<slug>
+//
+// What nexwall-partner-multitenant actually redirects a browser to (ADR
+// 0009, ADR 0008's "handoff" counterpart to Login's password replay). The
+// token itself is opaque here: this handler does not verify it, has no
+// reason to hold the tenant's handoff secret, and forwards it verbatim to
+// the target tenant's own /sso/handoff (nexwall-controller, ADR 0001
+// there), which does the actual verification with the copy of the same
+// secret ADR 0009 provisioned into its environment. On success, the
+// tenant's JWT comes back exactly as it would from a password-replay
+// login, and is wrapped in a session the same way.
+func (h *Handler) Handoff(c *gin.Context) {
+	token := c.Query("token")
+	slug := c.Query("tenant")
+	if token == "" || slug == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "token and tenant are required"})
+		return
+	}
+
+	t, err := h.Tenants.GetBySlug(slug)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired token"})
+		return
+	}
+
+	jwtToken, email, err := h.forwardHandoff(t, token)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired token"})
+		return
+	}
+
+	sess, err := h.Sessions.Create(email, t.TenantID, jwtToken)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not create session"})
+		return
+	}
+	c.SetCookie(CookieName, sess.ID, int(sessionTTL.Seconds()), "/", "", false, true)
+	c.Redirect(http.StatusFound, "/")
+}
+
+// forwardHandoff calls the tenant's own /sso/handoff and returns the JWT it
+// mints. email is best-effort (decoded from the JWT's own claims, not
+// re-verified here -- the tenant already proved the token was good by
+// minting a session off it); used only for Session.Email bookkeeping, never
+// for authorization decisions.
+func (h *Handler) forwardHandoff(t *tenant.Tenant, token string) (jwtToken, email string, err error) {
+	req, err := http.NewRequest(http.MethodGet, t.InClusterWebAddr()+"/sso/handoff?token="+url.QueryEscape(token), nil)
+	if err != nil {
+		return "", "", err
+	}
+
+	resp, err := h.HTTPClient.Do(req)
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", "", errInvalidCredentials
+	}
+
+	var out struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", "", err
+	}
+	return out.Token, jwtSubject(out.Token), nil
+}
+
+// jwtSubject reads the "id" claim out of a JWT's payload without verifying
+// the signature -- safe here specifically because the token was only ever
+// used for Session.Email bookkeeping, immediately after this same process
+// received it directly from the tenant that just minted and vouched for it
+// over the call in forwardHandoff above. Never use this pattern to make an
+// authorization decision.
+func jwtSubject(token string) string {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return ""
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return ""
+	}
+	var claims struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return ""
+	}
+	return claims.ID
 }
 
 // POST /logout
